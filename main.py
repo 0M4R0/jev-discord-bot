@@ -187,6 +187,66 @@ async def user_offenses(interaction: discord.Interaction, user: discord.Member) 
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+@bot.tree.command(name="timeout-user", description="Timeout a user")
+@app_commands.describe(user="The member to inspect")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def timeout_user(
+    interaction: discord.Interaction,
+    user: discord.Member,
+    minutes: app_commands.Range[int, 1, 10080],
+    reason: str | None = None,
+) -> None:
+    if not interaction.guild:
+        return
+
+    if user.id == interaction.guild.owner_id:
+        await interaction.response.send_message(
+            "You cannot timeout the owner of the guild.", ephemeral=True
+        )
+        return
+
+    # Interaction users are typed as User, so resolve the guild Member before
+    # accessing role hierarchy fields.
+    moderator = interaction.guild.get_member(interaction.user.id)
+    bot_member = interaction.guild.me
+    if moderator is None or bot_member is None:
+        await interaction.response.send_message(
+            "Unable to verify the server role hierarchy.", ephemeral=True
+        )
+        return
+
+    if user.top_role >= moderator.top_role:
+        await interaction.response.send_message(
+            "You cannot timeout someone with an equal or higher role.",
+            ephemeral=True,
+        )
+        return
+    if user.top_role >= bot_member.top_role:
+        await interaction.response.send_message(
+            "I cannot timeout that member (role hierarchy).", ephemeral=True
+        )
+        return
+
+    delta = timedelta(minutes=minutes)
+    why = reason or f"Manual timeout by {interaction.user}"
+
+    try:
+        await user.timeout(delta, reason=why)
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "Missing permission to timeout that member.", ephemeral=True
+        )
+        return
+    except discord.HTTPException as e:
+        await interaction.response.send_message(f"Timeout failed: {e}", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        f"Timed out {user.mention} for **{minutes}** minute(s). Reason: {why}",
+        ephemeral=True,
+    )
+
+
 @bot.tree.command(name="pardon", description="Pardon a member's latest active offense.")
 @app_commands.describe(user="Member to pardon")
 @app_commands.checks.has_permissions(administrator=True)

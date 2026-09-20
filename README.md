@@ -52,6 +52,7 @@ python main.py
 | `/set-timeouts`    | Change 3rd / 4th+ timeout lengths          |
 | `/set-thresholds`  | Change Jev confidence cutoffs              |
 | `/user-offenses`   | View a member's history (Moderate Members) |
+| `/timeout-user`    | Timeout a member (Moderate Members)        |
 | `/pardon`          | Pardon + add safe precedent                |
 | `/export-feedback` | Download JSON/CSV of flags for analysis    |
 | `/mod-config`      | Current settings + memory size             |
