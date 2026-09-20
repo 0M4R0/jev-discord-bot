@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import dataclass
-from typing import List, Optional
 
 import aiosqlite
 
@@ -14,7 +13,7 @@ from config import DATABASE_PATH
 @dataclass
 class GuildSettings:
     guild_id: int
-    mod_log_channel_id: Optional[int] = None
+    mod_log_channel_id: int | None = None
     tier1_threshold: float = 0.95
     tier2_threshold: float = 0.70
     first_timeout_mins: int = 10
@@ -32,7 +31,7 @@ class Offense:
     status: str  # ACTIVE | PARDONED | BANNED
     confidence: float
     created_at: str
-    resolved_at: Optional[str] = None
+    resolved_at: str | None = None
 
 
 class Database:
@@ -164,7 +163,7 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
-    async def pardon_latest(self, guild_id: int, user_id: int) -> Optional[Offense]:
+    async def pardon_latest(self, guild_id: int, user_id: int) -> Offense | None:
         async with self.db.execute(
             """
             SELECT * FROM offenses
@@ -206,7 +205,7 @@ class Database:
         )
         await self.db.commit()
 
-    async def get_user_offenses(self, guild_id: int, user_id: int) -> List[Offense]:
+    async def get_user_offenses(self, guild_id: int, user_id: int) -> list[Offense]:
         async with self.db.execute(
             """
             SELECT * FROM offenses
@@ -240,7 +239,7 @@ class Database:
         )
         await self.db.commit()
 
-    async def get_recent_false_flags(self, guild_id: int, limit: int = 5) -> List[str]:
+    async def get_recent_false_flags(self, guild_id: int, limit: int = 5) -> list[str]:
         async with self.db.execute(
             """
             SELECT message_content FROM false_flags
@@ -252,7 +251,7 @@ class Database:
             rows = await cursor.fetchall()
         return [r["message_content"] for r in rows]
 
-    async def export_feedback(self, guild_id: int) -> List[dict]:
+    async def export_feedback(self, guild_id: int) -> list[dict]:
         async with self.db.execute(
             """
             SELECT message_content, status, confidence, created_at, action

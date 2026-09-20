@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import List, Optional
 
 import discord
 from discord import ui
@@ -17,12 +16,14 @@ logger = logging.getLogger("moderator")
 
 def build_state(
     message: discord.Message,
-    recent_false_flags: Optional[List[str]] = None,
+    recent_false_flags: list[str] | None = None,
 ) -> str:
     """Build structured state text for Jev."""
     now = datetime.datetime.now(datetime.timezone.utc)
     account_age_days = (now - message.author.created_at).days
-    has_link = "http://" in message.content.lower() or "https://" in message.content.lower()
+    has_link = (
+        "http://" in message.content.lower() or "https://" in message.content.lower()
+    )
     channel_name = getattr(message.channel, "name", "unknown")
 
     lines = [
@@ -57,14 +58,18 @@ class ConfirmView(ui.View):
         super().__init__(timeout=timeout)
         self.action = action
         self.confirmed = False
-        self.value: Optional[bool] = None
+        self.value: bool | None = None
 
     @ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: ui.Button) -> None:
+    async def confirm(
+        self, interaction: discord.Interaction, button: ui.Button
+    ) -> None:
         self.confirmed = True
         self.value = True
         self.stop()
-        await interaction.response.edit_message(content=f"✅ {self.action} confirmed.", view=None)
+        await interaction.response.edit_message(
+            content=f"✅ {self.action} confirmed.", view=None
+        )
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button) -> None:
@@ -78,7 +83,7 @@ class ModLogView(ui.View):
 
     def __init__(
         self,
-        moderator: "MessageModerator",
+        moderator: MessageModerator,
         guild_id: int,
         user_id: int,
         message_content: str,
@@ -91,9 +96,29 @@ class ModLogView(ui.View):
         self.message_content = message_content
         self.offense_id = offense_id
 
-    @ui.button(label="🟢 Pardon (False Flag)", style=discord.ButtonStyle.success, custom_id="pardon")
+    def check_admin(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+
+        member = interaction.guild.get_member(interaction.user.id)
+        if member is None:
+            return False
+
+        channel = interaction.channel
+        if channel is None:
+            return False
+
+        permissions = channel.permissions_for(member)
+        return permissions.administrator
+
+    @ui.button(
+        label="🟢 Pardon (False Flag)",
+        style=discord.ButtonStyle.success,
+        custom_id="pardon",
+    )
     async def pardon(self, interaction: discord.Interaction, button: ui.Button) -> None:
-        if not interaction.user.guild_permissions.administrator:
+        # Check if the user is an admin
+        if not self.check_admin(interaction):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
 
@@ -126,11 +151,17 @@ class ModLogView(ui.View):
             )
             # Update original embed if possible
             try:
-                embed = interaction.message.embeds[0] if interaction.message.embeds else None
+                message = interaction.message
+                if message is None:
+                    return
+
+                embed = message.embeds[0] if message.embeds else None
                 if embed:
                     embed.color = discord.Color.green()
-                    embed.add_field(name="Resolution", value="🟢 PARDONED", inline=False)
-                    await interaction.message.edit(embed=embed, view=None)
+                    embed.add_field(
+                        name="Resolution", value="🟢 PARDONED", inline=False
+                    )
+                    await message.edit(embed=embed, view=None)
             except Exception:
                 pass
         else:
@@ -138,7 +169,8 @@ class ModLogView(ui.View):
 
     @ui.button(label="🔴 Ban User", style=discord.ButtonStyle.danger, custom_id="ban")
     async def ban(self, interaction: discord.Interaction, button: ui.Button) -> None:
-        if not interaction.user.guild_permissions.administrator:
+        # Check if the user is an admin
+        if not self.check_admin(interaction):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
 
@@ -160,19 +192,28 @@ class ModLogView(ui.View):
             if member:
                 await member.ban(reason="Escalated from moderation bot")
             else:
-                await guild.ban(discord.Object(id=self.user_id), reason="Escalated from moderation bot")
+                await guild.ban(
+                    discord.Object(id=self.user_id),
+                    reason="Escalated from moderation bot",
+                )
             await self.moderator.db.mark_banned(self.guild_id, self.user_id)
             await interaction.followup.send("User banned.", ephemeral=True)
             try:
-                embed = interaction.message.embeds[0] if interaction.message.embeds else None
+                message = interaction.message
+                if message is None:
+                    return
+
+                embed = message.embeds[0] if message.embeds else None
                 if embed:
                     embed.color = discord.Color.dark_red()
                     embed.add_field(name="Resolution", value="🔴 BANNED", inline=False)
-                    await interaction.message.edit(embed=embed, view=None)
+                    await message.edit(embed=embed, view=None)
             except Exception:
                 pass
         except discord.Forbidden:
-            await interaction.followup.send("Missing Ban Members permission.", ephemeral=True)
+            await interaction.followup.send(
+                "Missing Ban Members permission.", ephemeral=True
+            )
         except discord.HTTPException as e:
             await interaction.followup.send(f"Ban failed: {e}", ephemeral=True)
 
@@ -184,7 +225,7 @@ class MessageModerator:
 
     async def evaluate_message(
         self, message: discord.Message, settings: GuildSettings
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Run Jev and return threat decision or None if clean."""
         if message.author.bot or not message.guild or not message.content.strip():
             return None
@@ -225,7 +266,9 @@ class MessageModerator:
 
         choice = threat.choice
         conf = threat.confidence or 0.0
-        phishing_score = phishing.noul if phishing and phishing.noul is not None else 0.0
+        phishing_score = (
+            phishing.noul if phishing and phishing.noul is not None else 0.0
+        )
 
         # Apply configurable thresholds
         if choice == "tier1" and conf >= settings.tier1_threshold:
@@ -268,7 +311,14 @@ class MessageModerator:
 
         # Delete message
         try:
-            await message.delete(reason=f"Jev threat {decision['choice']} conf={decision['confidence']:.2f}")
+            await message.delete()
+            # Log the deletion
+            logger.info(
+                "Deleted message %s: Jev threat=%s confidence=%.2f",
+                message.id,
+                decision["choice"],
+                decision["confidence"],
+            )
         except discord.HTTPException:
             pass
 
@@ -299,14 +349,18 @@ class MessageModerator:
 
         # Apply timeout if needed
         if timeout_mins > 0:
-            try:
-                delta = datetime.timedelta(minutes=timeout_mins)
-                await message.author.timeout(
-                    delta,
-                    reason=f"Moderation escalation (offense #{next_count})",
-                )
-            except discord.HTTPException as e:
-                logger.warning("Timeout failed: %s", e)
+            author = message.author
+            if isinstance(author, discord.Member):
+                try:
+                    delta = datetime.timedelta(minutes=timeout_mins)
+                    await author.timeout(
+                        delta,
+                        reason=f"Moderation escalation (offense #{next_count})",
+                    )
+                except discord.HTTPException as e:
+                    logger.warning("Timeout failed: %s", e)
+            else:
+                logger.warning("Cannot timeout non-member (DM or left server)")
 
         # DM user
         dm_text = self._build_dm(next_count, timeout_mins, decision)
@@ -322,21 +376,46 @@ class MessageModerator:
             if channel and isinstance(channel, discord.TextChannel):
                 embed = discord.Embed(
                     title="🛡️ Moderation Action",
-                    color=discord.Color.orange() if next_count < 3 else discord.Color.red(),
+                    color=discord.Color.orange()
+                    if next_count < 3
+                    else discord.Color.red(),
                     timestamp=datetime.datetime.now(datetime.timezone.utc),
                 )
-                embed.add_field(name="User", value=f"{message.author.mention} (`{message.author.id}`)", inline=True)
+                embed.add_field(
+                    name="User",
+                    value=f"{message.author.mention} (`{message.author.id}`)",
+                    inline=True,
+                )
                 embed.add_field(name="Offense #", value=str(next_count), inline=True)
                 embed.add_field(name="Action", value=action, inline=True)
-                embed.add_field(name="Confidence", value=f"{decision['confidence']:.3f}", inline=True)
-                embed.add_field(name="Phishing score", value=f"{decision.get('phishing', 0):.3f}", inline=True)
-                embed.add_field(name="Channel", value=message.channel.mention, inline=True)
+                embed.add_field(
+                    name="Confidence",
+                    value=f"{decision['confidence']:.3f}",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="Phishing score",
+                    value=f"{decision.get('phishing', 0):.3f}",
+                    inline=True,
+                )
+                channel_value = (
+                    message.channel.mention
+                    if isinstance(message.channel, discord.abc.GuildChannel)
+                    else "DM"
+                )
+                embed.add_field(name="Channel", value=channel_value, inline=True)
                 embed.add_field(
                     name="Content",
-                    value=f"```{message.content[:800]}```" if message.content else "*empty*",
+                    value=f"```{message.content[:800]}```"
+                    if message.content
+                    else "*empty*",
                     inline=False,
                 )
-                embed.add_field(name="DM delivered", value="Yes" if dm_ok else "No (DMs closed)", inline=True)
+                embed.add_field(
+                    name="DM delivered",
+                    value="Yes" if dm_ok else "No (DMs closed)",
+                    inline=True,
+                )
                 embed.set_footer(text=f"Offense ID {offense_id}")
 
                 view = ModLogView(
@@ -360,7 +439,9 @@ class MessageModerator:
         if offense_num == 1:
             return base + "\n\nThis is a warning. Further violations will escalate."
         if offense_num == 2:
-            return base + "\n\n**Final warning.** Next offense will result in a timeout."
+            return (
+                base + "\n\n**Final warning.** Next offense will result in a timeout."
+            )
         if timeout_mins:
             return base + f"\n\nYou have been timed out for **{timeout_mins} minutes**."
         return base

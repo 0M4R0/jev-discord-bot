@@ -7,7 +7,8 @@ import io
 import json
 import logging
 import sys
-from typing import Literal, Optional
+from datetime import timedelta
+from typing import Literal
 
 import discord
 from discord import app_commands
@@ -61,10 +62,15 @@ async def on_message(message: discord.Message) -> None:
 
 # ---------- Slash commands ----------
 
-@bot.tree.command(name="set-mod-log", description="Set the channel for moderation alerts.")
+
+@bot.tree.command(
+    name="set-mod-log", description="Set the channel for moderation alerts."
+)
 @app_commands.describe(channel="The #mod-log channel")
 @app_commands.checks.has_permissions(administrator=True)
-async def set_mod_log(interaction: discord.Interaction, channel: discord.TextChannel) -> None:
+async def set_mod_log(
+    interaction: discord.Interaction, channel: discord.TextChannel
+) -> None:
     if not interaction.guild:
         return
     perms = channel.permissions_for(interaction.guild.me)
@@ -77,7 +83,9 @@ async def set_mod_log(interaction: discord.Interaction, channel: discord.TextCha
     settings = await db_instance.get_guild_settings(interaction.guild.id)
     settings.mod_log_channel_id = channel.id
     await db_instance.save_guild_settings(settings)
-    await interaction.response.send_message(f"Mod-log set to {channel.mention}", ephemeral=True)
+    await interaction.response.send_message(
+        f"Mod-log set to {channel.mention}", ephemeral=True
+    )
 
 
 @bot.tree.command(name="unset-mod-log", description="Remove the mod-log channel.")
@@ -88,10 +96,14 @@ async def unset_mod_log(interaction: discord.Interaction) -> None:
     settings = await db_instance.get_guild_settings(interaction.guild.id)
     settings.mod_log_channel_id = None
     await db_instance.save_guild_settings(settings)
-    await interaction.response.send_message("Mod-log unset. Actions still go to Server Audit Log.", ephemeral=True)
+    await interaction.response.send_message(
+        "Mod-log unset. Actions still go to Server Audit Log.", ephemeral=True
+    )
 
 
-@bot.tree.command(name="set-timeouts", description="Set timeout durations for escalations.")
+@bot.tree.command(
+    name="set-timeouts", description="Set timeout durations for escalations."
+)
 @app_commands.describe(
     first_offense_mins="Timeout minutes on 3rd offense (default 10)",
     subsequent_offense_mins="Timeout minutes on 4th+ offenses (default 60)",
@@ -114,7 +126,9 @@ async def set_timeouts(
     )
 
 
-@bot.tree.command(name="set-thresholds", description="Adjust Jev confidence thresholds.")
+@bot.tree.command(
+    name="set-thresholds", description="Adjust Jev confidence thresholds."
+)
 @app_commands.describe(
     tier1="High-confidence threat threshold (default 0.95)",
     tier2="Medium-confidence threat threshold (default 0.70)",
@@ -122,8 +136,10 @@ async def set_timeouts(
 @app_commands.checks.has_permissions(administrator=True)
 async def set_thresholds(
     interaction: discord.Interaction,
-    tier1: app_commands.Range[float, 0.5, 1.0],
-    tier2: app_commands.Range[float, 0.3, 1.0],
+    # discord.py consumes the numeric bounds at runtime.  Some Pyright/Pylance
+    # versions incorrectly treat those values as type arguments.
+    tier1: app_commands.Range[float, 0.5, 1.0],  # type: ignore[valid-type]
+    tier2: app_commands.Range[float, 0.3, 1.0],  # type: ignore[valid-type]
 ) -> None:
     if not interaction.guild:
         return
@@ -140,7 +156,9 @@ async def set_thresholds(
     )
 
 
-@bot.tree.command(name="user-offenses", description="Show a member's infraction history.")
+@bot.tree.command(
+    name="user-offenses", description="Show a member's infraction history."
+)
 @app_commands.describe(user="The member to inspect")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def user_offenses(interaction: discord.Interaction, user: discord.Member) -> None:
@@ -148,7 +166,9 @@ async def user_offenses(interaction: discord.Interaction, user: discord.Member) 
         return
     offenses = await db_instance.get_user_offenses(interaction.guild.id, user.id)
     if not offenses:
-        await interaction.response.send_message(f"No recorded offenses for {user.mention}.", ephemeral=True)
+        await interaction.response.send_message(
+            f"No recorded offenses for {user.mention}.", ephemeral=True
+        )
         return
 
     embed = discord.Embed(
@@ -156,7 +176,9 @@ async def user_offenses(interaction: discord.Interaction, user: discord.Member) 
         color=discord.Color.blue(),
     )
     for o in offenses[:15]:
-        status_emoji = {"ACTIVE": "🔴", "PARDONED": "🟢", "BANNED": "⚫"}.get(o.status, "⚪")
+        status_emoji = {"ACTIVE": "🔴", "PARDONED": "🟢", "BANNED": "⚫"}.get(
+            o.status, "⚪"
+        )
         embed.add_field(
             name=f"{status_emoji} #{o.id} · {o.action} · {o.status}",
             value=f"`{o.created_at[:19]}` · conf={o.confidence:.2f}\n```{o.message_content[:120]}```",
@@ -173,7 +195,9 @@ async def pardon_user(interaction: discord.Interaction, user: discord.Member) ->
         return
     offense = await db_instance.pardon_latest(interaction.guild.id, user.id)
     if not offense:
-        await interaction.response.send_message("No active offense to pardon.", ephemeral=True)
+        await interaction.response.send_message(
+            "No active offense to pardon.", ephemeral=True
+        )
         return
     await db_instance.add_false_flag(interaction.guild.id, offense.message_content)
     if user.timed_out_until:
@@ -187,7 +211,9 @@ async def pardon_user(interaction: discord.Interaction, user: discord.Member) ->
     )
 
 
-@bot.tree.command(name="export-feedback", description="Export false flags & threats as JSON or CSV.")
+@bot.tree.command(
+    name="export-feedback", description="Export false flags & threats as JSON or CSV."
+)
 @app_commands.describe(file_format="json or csv")
 @app_commands.checks.has_permissions(administrator=True)
 async def export_feedback(
@@ -203,14 +229,14 @@ async def export_feedback(
 
     if file_format == "json":
         data = json.dumps(rows, indent=2)
-        fp = io.BytesIO(data.encode("utf-8"))
+        fp = io.BytesIO(data.encode("utf-8"))  # type: ignore[abstract]
         file = discord.File(fp, filename="feedback.json")
     else:
-        buf = io.StringIO()
+        buf = io.StringIO()  # type: ignore[abstract]
         writer = csv.DictWriter(buf, fieldnames=rows[0].keys())
         writer.writeheader()
         writer.writerows(rows)
-        fp = io.BytesIO(buf.getvalue().encode("utf-8"))
+        fp = io.BytesIO(buf.getvalue().encode("utf-8"))  # type: ignore[abstract]
         file = discord.File(fp, filename="feedback.csv")
 
     await interaction.response.send_message("Export ready.", file=file, ephemeral=True)
@@ -223,14 +249,26 @@ async def mod_config(interaction: discord.Interaction) -> None:
         return
     settings = await db_instance.get_guild_settings(interaction.guild.id)
     flags = await db_instance.get_recent_false_flags(interaction.guild.id, limit=20)
-    log_ch = f"<#{settings.mod_log_channel_id}>" if settings.mod_log_channel_id else "Not set"
+    log_ch = (
+        f"<#{settings.mod_log_channel_id}>"
+        if settings.mod_log_channel_id
+        else "Not set"
+    )
 
     embed = discord.Embed(title="Moderation Config", color=discord.Color.blurple())
     embed.add_field(name="Mod-log channel", value=log_ch, inline=False)
-    embed.add_field(name="Tier1 threshold", value=f"{settings.tier1_threshold:.2f}", inline=True)
-    embed.add_field(name="Tier2 threshold", value=f"{settings.tier2_threshold:.2f}", inline=True)
-    embed.add_field(name="3rd offense timeout", value=f"{settings.first_timeout_mins}m", inline=True)
-    embed.add_field(name="4th+ timeout", value=f"{settings.subsequent_timeout_mins}m", inline=True)
+    embed.add_field(
+        name="Tier1 threshold", value=f"{settings.tier1_threshold:.2f}", inline=True
+    )
+    embed.add_field(
+        name="Tier2 threshold", value=f"{settings.tier2_threshold:.2f}", inline=True
+    )
+    embed.add_field(
+        name="3rd offense timeout", value=f"{settings.first_timeout_mins}m", inline=True
+    )
+    embed.add_field(
+        name="4th+ timeout", value=f"{settings.subsequent_timeout_mins}m", inline=True
+    )
     embed.add_field(
         name="Jev in-context memory",
         value=f"{len(flags)} active safe precedent(s)",
@@ -248,7 +286,9 @@ async def on_app_command_error(
     else:
         logger.exception("Command error: %s", error)
         if not interaction.response.is_done():
-            await interaction.response.send_message("Something went wrong.", ephemeral=True)
+            await interaction.response.send_message(
+                "Something went wrong.", ephemeral=True
+            )
 
 
 def main() -> None:

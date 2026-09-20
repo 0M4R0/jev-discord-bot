@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
-from typesafe_sdk import AsyncTypeSafeClient, Choice as SdkChoice, Noul as SdkNoul
+from typesafe_sdk import AsyncTypeSafeClient
+from typesafe_sdk import Choice as SdkChoice
+from typesafe_sdk import Noul as SdkNoul
 
 
 @dataclass
@@ -14,7 +16,7 @@ class Choice:
     """Ask Jev to pick one option from a set of criteria."""
 
     instructions: str
-    criteria: Dict[str, Optional[str]]
+    criteria: dict[str, str | None]
 
 
 @dataclass
@@ -27,17 +29,17 @@ class Noul:
 @dataclass
 class QuestionResult:
     type: str
-    choice: Optional[str] = None
-    probabilities: Optional[Dict[str, float]] = None
-    confidence: Optional[float] = None
-    noul: Optional[float] = None
+    choice: str | None = None
+    probabilities: dict[str, float] | None = None
+    confidence: float | None = None
+    noul: float | None = None
 
 
 @dataclass
 class TypeSafeEvaluationResponse:
     model: str
-    answers: Dict[str, QuestionResult]
-    usage: Optional[Dict[str, Any]] = None
+    answers: dict[str, QuestionResult]
+    usage: dict[str, Any] | None = None
 
 
 class AsyncTypeSafe:
@@ -45,7 +47,7 @@ class AsyncTypeSafe:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "jev-latest",
         base_url: str = "https://api.typesafe.ai",
         timeout: float = 10.0,
@@ -57,13 +59,13 @@ class AsyncTypeSafe:
 
     async def evaluate(
         self,
-        state: Union[str, Dict[str, Any], List[Any]],
-        questions: Dict[str, Union[Choice, Noul]],
-        model: Optional[str] = None,
+        state: str | dict[str, Any] | list[Any],
+        questions: dict[str, Choice | Noul],
+        model: str | None = None,
     ) -> TypeSafeEvaluationResponse:
         target_model = model or self.model
 
-        sdk_questions: Dict[str, Any] = {}
+        sdk_questions: dict[str, Any] = {}
         for key, q in questions.items():
             if isinstance(q, Choice):
                 sdk_questions[key] = SdkChoice(
@@ -77,7 +79,7 @@ class AsyncTypeSafe:
 
         async with AsyncTypeSafeClient(
             api_key=self.api_key or None,
-            default_model=target_model,
+            model=target_model,
             base_url=self.base_url,
             timeout=self.timeout,
         ) as client:
@@ -87,7 +89,7 @@ class AsyncTypeSafe:
                 model=target_model,
             )
 
-        answers: Dict[str, QuestionResult] = {}
+        answers: dict[str, QuestionResult] = {}
         raw_answers = getattr(resp, "answers", {}) or {}
         for key, ans in raw_answers.items():
             ans_type = getattr(ans, "type", None) or type(ans).__name__.lower()

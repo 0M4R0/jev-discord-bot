@@ -45,20 +45,20 @@ python main.py
 
 ## Commands (Administrator unless noted)
 
-| Command | Description |
-|---------|-------------|
-| `/set-mod-log` | Set the alert channel |
-| `/unset-mod-log` | Clear it |
-| `/set-timeouts` | Change 3rd / 4th+ timeout lengths |
-| `/set-thresholds` | Change Jev confidence cutoffs |
-| `/user-offenses` | View a member's history (Moderate Members) |
-| `/pardon` | Pardon + add safe precedent |
-| `/export-feedback` | Download JSON/CSV of flags for analysis |
-| `/mod-config` | Current settings + memory size |
+| Command            | Description                                |
+| ------------------ | ------------------------------------------ |
+| `/set-mod-log`     | Set the alert channel                      |
+| `/unset-mod-log`   | Clear it                                   |
+| `/set-timeouts`    | Change 3rd / 4th+ timeout lengths          |
+| `/set-thresholds`  | Change Jev confidence cutoffs              |
+| `/user-offenses`   | View a member's history (Moderate Members) |
+| `/pardon`          | Pardon + add safe precedent                |
+| `/export-feedback` | Download JSON/CSV of flags for analysis    |
+| `/mod-config`      | Current settings + memory size             |
 
 ## How Jev is used
 
-Every message is turned into a structured state (account age, link presence, channel, content, + recent pardoned messages).  
+Every message is turned into a structured state (account age, link presence, channel, content, + recent pardoned messages).
 
 Jev answers two questions in parallel:
 
