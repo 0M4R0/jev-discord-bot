@@ -1,5 +1,7 @@
 # Jev Moderation Bot
 
+IT works, just in case
+
 Real-time Discord moderation powered by **TypeSafe AI System One (Jev)**.
 
 Detects phishing, spam, and social engineering. Progressive 4-stage escalation. False-flag memory that feeds back into Jev as in-context learning.
