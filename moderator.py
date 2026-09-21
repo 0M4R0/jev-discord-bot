@@ -270,6 +270,17 @@ class MessageModerator:
             phishing.noul if phishing and phishing.noul is not None else 0.0
         )
 
+        logger.info(
+            "Jev decision for message %s: choice=%s confidence=%.3f "
+            "phishing=%.3f thresholds=(tier1 %.2f, tier2 %.2f)",
+            message.id,
+            choice,
+            conf,
+            phishing_score,
+            settings.tier1_threshold,
+            settings.tier2_threshold,
+        )
+
         # Apply configurable thresholds
         if choice == "tier1" and conf >= settings.tier1_threshold:
             return {
@@ -288,7 +299,7 @@ class MessageModerator:
                 "raw": result,
             }
         # Also escalate pure high phishing noul even if choice drifted
-        if phishing_score >= 0.90 and conf >= settings.tier2_threshold:
+        if phishing_score >= 0.86:
             return {
                 "tier": 1 if phishing_score >= 0.95 else 2,
                 "choice": "tier1" if phishing_score >= 0.95 else "tier2",
@@ -309,6 +320,24 @@ class MessageModerator:
         if not guild:
             return
 
+        is_guild_owner = message.author.id == guild.owner_id
+
+        # Guild owner is completely exempt from moderation
+        if is_guild_owner:
+            logger.info(
+                "Ignoring moderation offense from guild owner %s",
+                message.author.id,
+            )
+            return
+
+        logger.info(
+            "Handling offense for message %s from user %s: tier=%s confidence=%.3f",
+            message.id,
+            message.author.id,
+            decision.get("tier"),
+            decision.get("confidence", 0.0),
+        )
+
         # Delete message
         try:
             await message.delete()
@@ -319,8 +348,13 @@ class MessageModerator:
                 decision["choice"],
                 decision["confidence"],
             )
-        except discord.HTTPException:
-            pass
+        except discord.Forbidden:
+            logger.warning(
+                "Cannot delete message %s: missing Manage Messages permission",
+                message.id,
+            )
+        except discord.HTTPException as e:
+            logger.warning("Failed to delete message %s: %s", message.id, e)
 
         count = await self.db.count_active_offenses(guild.id, message.author.id)
         next_count = count + 1
@@ -349,26 +383,61 @@ class MessageModerator:
 
         # Apply timeout if needed
         if timeout_mins > 0:
-            author = message.author
-            if isinstance(author, discord.Member):
+            author = guild.get_member(message.author.id)
+
+            # Check if the user is a member of this guild
+            if author is None:
+                logger.warning(
+                    "Cannot timeout %s: user is not a member of this guild",
+                    message.author.id,
+                )
+                return
+
+            bot_member = guild.me
+            if bot_member is None:
+                logger.warning(
+                    "Cannot timeout %s: bot member is unavailable",
+                    author.id,
+                )
+            elif author.top_role >= bot_member.top_role:
+                logger.warning(
+                    "Cannot timeout %s: user role %s is equal to or higher than bot role %s",
+                    author.id,
+                    author.top_role.name,
+                    bot_member.top_role.name,
+                )
+            else:
                 try:
                     delta = datetime.timedelta(minutes=timeout_mins)
                     await author.timeout(
                         delta,
                         reason=f"Moderation escalation (offense #{next_count})",
                     )
+                except discord.Forbidden:
+                    logger.warning(
+                        "Cannot timeout %s: missing Moderate Members permission",
+                        author.id,
+                    )
                 except discord.HTTPException as e:
                     logger.warning("Timeout failed: %s", e)
-            else:
-                logger.warning("Cannot timeout non-member (DM or left server)")
 
         # DM user
         dm_text = self._build_dm(next_count, timeout_mins, decision)
+        dm_ok = False
         try:
             await message.author.send(dm_text)
             dm_ok = True
-        except discord.HTTPException:
-            dm_ok = False
+        except discord.Forbidden:
+            logger.warning(
+                "Could not DM user %s: DMs are disabled or blocked",
+                message.author.id,
+            )
+        except discord.HTTPException as e:
+            logger.warning(
+                "Could not DM user %s: %s",
+                message.author.id,
+                e,
+            )
 
         # Mod-log embed
         if settings.mod_log_channel_id:
