@@ -231,6 +231,56 @@ class Database:
             for r in rows
         ]
 
+    async def get_offense(self, offense_id: int) -> Offense | None:
+        async with self.db.execute(
+            "SELECT * FROM offenses WHERE id = ?", (offense_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return Offense(
+            id=row["id"],
+            guild_id=row["guild_id"],
+            user_id=row["user_id"],
+            message_content=row["message_content"],
+            channel_id=row["channel_id"],
+            action=row["action"],
+            status=row["status"],
+            confidence=row["confidence"],
+            created_at=row["created_at"],
+            resolved_at=row["resolved_at"],
+        )
+
+    async def get_active_offenses(self) -> list[Offense]:
+        """Return offenses whose mod-log actions can still be handled."""
+        cursor = await self.db.execute(
+            "SELECT * FROM offenses WHERE status = 'ACTIVE' ORDER BY id"
+        )
+        rows = await cursor.fetchall()
+        return [
+            Offense(
+                id=row["id"],
+                guild_id=row["guild_id"],
+                user_id=row["user_id"],
+                message_content=row["message_content"],
+                channel_id=row["channel_id"],
+                action=row["action"],
+                status=row["status"],
+                confidence=row["confidence"],
+                created_at=row["created_at"],
+                resolved_at=row["resolved_at"],
+            )
+            for row in rows
+        ]
+
+    async def pardon_offense(self, offense_id: int) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        await self.db.execute(
+            "UPDATE offenses SET status = 'PARDONED', resolved_at = ? WHERE id = ?",
+            (now, offense_id),
+        )
+        await self.db.commit()
+
     async def add_false_flag(self, guild_id: int, message_content: str) -> None:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         await self.db.execute(

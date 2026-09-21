@@ -96,20 +96,14 @@ class ModLogView(ui.View):
         self.message_content = message_content
         self.offense_id = offense_id
 
+    # Check if the user using this command is able to moderate members
     def check_admin(self, interaction: discord.Interaction) -> bool:
-        if interaction.guild is None:
-            return False
-
-        member = interaction.guild.get_member(interaction.user.id)
-        if member is None:
-            return False
-
-        channel = interaction.channel
-        if channel is None:
-            return False
-
-        permissions = channel.permissions_for(member)
-        return permissions.administrator
+        member = interaction.user
+        return (
+            interaction.guild is not None
+            and isinstance(member, discord.Member)
+            and member.guild_permissions.moderate_members
+        )
 
     @ui.button(
         label="🟢 Pardon (False Flag)",
@@ -122,6 +116,23 @@ class ModLogView(ui.View):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
 
+        # Parse offense_id from custom_id
+        data = interaction.data
+        if data is None or "custom_id" not in data:
+            await interaction.response.send_message(
+                "Invalid button data.", ephemeral=True
+            )
+            return
+
+        try:
+            offense_id = int(data["custom_id"].split(":")[-1])
+        except (ValueError, IndexError, TypeError):
+            await interaction.response.send_message(
+                "Invalid button data.", ephemeral=True
+            )
+            return
+
+        # Confirmation
         view = ConfirmView("Pardon")
         await interaction.response.send_message(
             "Confirm pardon? This marks the message as a safe precedent for Jev.",
@@ -132,40 +143,51 @@ class ModLogView(ui.View):
         if not view.confirmed:
             return
 
-        offense = await self.moderator.db.pardon_latest(self.guild_id, self.user_id)
-        if offense:
-            await self.moderator.db.add_false_flag(self.guild_id, self.message_content)
-            # Lift timeout if active
-            guild = interaction.guild
-            if guild:
-                member = guild.get_member(self.user_id)
-                if member and member.timed_out_until:
-                    try:
-                        await member.timeout(None, reason="Pardoned false flag")
-                    except discord.HTTPException:
-                        pass
+        # Get offense
+        offense = await self.moderator.db.get_offense(offense_id)
+        if not offense or offense.status != "ACTIVE":
+            await interaction.followup.send("No active offense found.", ephemeral=True)
+            return
 
+        # Process pardon
+        await self.moderator.db.pardon_offense(offense_id)
+        await self.moderator.db.add_false_flag(
+            offense.guild_id, offense.message_content
+        )
+
+        # Lift timeout if active
+        guild = interaction.guild
+        if not guild:
+            return
+
+        try:
+            member = guild.get_member(offense.user_id)
+            if member and member.timed_out_until:
+                try:
+                    await member.timeout(None, reason="Pardoned false flag")
+                except discord.HTTPException:
+                    pass
+
+            # Handle followup response
             await interaction.followup.send(
                 f"Pardoned. Safe precedent added for Jev. Offense #{offense.id}.",
                 ephemeral=True,
             )
-            # Update original embed if possible
+
+            # Update original embed
             try:
                 message = interaction.message
-                if message is None:
-                    return
-
-                embed = message.embeds[0] if message.embeds else None
-                if embed:
+                if message and message.embeds:
+                    embed = message.embeds[0]
                     embed.color = discord.Color.green()
                     embed.add_field(
                         name="Resolution", value="🟢 PARDONED", inline=False
                     )
                     await message.edit(embed=embed, view=None)
-            except Exception:
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        else:
-            await interaction.followup.send("No active offense found.", ephemeral=True)
+        except discord.HTTPException:
+            pass
 
     @ui.button(label="🔴 Ban User", style=discord.ButtonStyle.danger, custom_id="ban")
     async def ban(self, interaction: discord.Interaction, button: ui.Button) -> None:
@@ -174,6 +196,23 @@ class ModLogView(ui.View):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
 
+        # Parse offense_id from custom_id
+        data = interaction.data
+        if data is None or "custom_id" not in data:
+            await interaction.response.send_message(
+                "Invalid button data.", ephemeral=True
+            )
+            return
+
+        try:
+            offense_id = int(data["custom_id"].split(":")[-1])
+        except (ValueError, IndexError, TypeError):
+            await interaction.response.send_message(
+                "Invalid button data.", ephemeral=True
+            )
+            return
+
+        # Confirmation
         view = ConfirmView("Ban")
         await interaction.response.send_message(
             "Confirm permanent ban?",
@@ -184,32 +223,40 @@ class ModLogView(ui.View):
         if not view.confirmed:
             return
 
+        # Get offense
+        offense = await self.moderator.db.get_offense(offense_id)
+        if not offense or offense.status != "ACTIVE":
+            await interaction.followup.send("No active offense found.", ephemeral=True)
+            return
+
+        # Process ban
         guild = interaction.guild
         if not guild:
             return
-        member = guild.get_member(self.user_id)
+
         try:
+            member = guild.get_member(offense.user_id)
             if member:
                 await member.ban(reason="Escalated from moderation bot")
             else:
                 await guild.ban(
-                    discord.Object(id=self.user_id),
+                    discord.Object(id=offense.user_id),
                     reason="Escalated from moderation bot",
                 )
-            await self.moderator.db.mark_banned(self.guild_id, self.user_id)
+            await self.moderator.db.mark_banned(offense.guild_id, offense.user_id)
             await interaction.followup.send("User banned.", ephemeral=True)
+
+            # Update original embed if possible
             try:
                 message = interaction.message
-                if message is None:
-                    return
-
-                embed = message.embeds[0] if message.embeds else None
-                if embed:
+                if message and message.embeds:
+                    embed = message.embeds[0]
                     embed.color = discord.Color.dark_red()
                     embed.add_field(name="Resolution", value="🔴 BANNED", inline=False)
                     await message.edit(embed=embed, view=None)
-            except Exception:
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
+
         except discord.Forbidden:
             await interaction.followup.send(
                 "Missing Ban Members permission.", ephemeral=True
@@ -459,12 +506,12 @@ class MessageModerator:
                 embed.add_field(name="Action", value=action, inline=True)
                 embed.add_field(
                     name="Confidence",
-                    value=f"{decision['confidence']:.3f}",
+                    value=f"{decision['confidence']:.2f}",
                     inline=True,
                 )
                 embed.add_field(
                     name="Phishing score",
-                    value=f"{decision.get('phishing', 0):.3f}",
+                    value=f"{decision.get('phishing', 0):.2f}",
                     inline=True,
                 )
                 channel_value = (
@@ -494,6 +541,8 @@ class MessageModerator:
                     message.content[:500],
                     offense_id,
                 )
+                view.pardon.custom_id = f"modlog:pardon:{offense_id}"
+                view.ban.custom_id = f"modlog:ban:{offense_id}"
                 try:
                     await channel.send(embed=embed, view=view)
                 except discord.HTTPException as e:

@@ -17,7 +17,7 @@ from discord.ext import commands
 
 import config
 from database import db_instance
-from moderator import MessageModerator
+from moderator import MessageModerator, ModLogView
 from typesafe import AsyncTypeSafe
 
 logging.basicConfig(
@@ -36,9 +36,31 @@ typesafe_client = AsyncTypeSafe(api_key=config.TYPESAFE_API_KEY)
 moderator = MessageModerator(client=typesafe_client, db=db_instance)
 
 
+async def restore_mod_log_views() -> None:
+    """Re-register persistent mod-log buttons after a process restart."""
+    active_offenses = await db_instance.get_active_offenses()
+    for offense in active_offenses:
+        view = ModLogView(
+            moderator,
+            offense.guild_id,
+            offense.user_id,
+            offense.message_content,
+            offense.id,
+        )
+        view.pardon.custom_id = f"modlog:pardon:{offense.id}"
+        view.ban.custom_id = f"modlog:ban:{offense.id}"
+        bot.add_view(view)
+    logger.info("Restored %d persistent mod-log views", len(active_offenses))
+
+
+@bot.event
+async def setup_hook() -> None:
+    await db_instance.connect()
+    await restore_mod_log_views()
+
+
 @bot.event
 async def on_ready() -> None:
-    await db_instance.connect()
     logger.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "?")
     try:
         synced = await bot.tree.sync()
